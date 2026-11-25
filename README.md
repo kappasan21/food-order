@@ -1,6 +1,6 @@
 # Trattoria Test — Italian Food Order App
 
-Next.js 16 food ordering app backed by **Turso** (libSQL cloud). Customers browse 10 Italian dishes, create an account, and place orders via **Stripe** hosted checkout. An admin role can view all orders and advance their status.
+Next.js 16 food ordering app backed by **Turso** (libSQL cloud). Customers browse Italian dishes, create an account, and place orders via **Stripe** hosted checkout. A protected admin panel lets staff manage orders, users, and the menu.
 
 ## Tech stack
 
@@ -8,15 +8,22 @@ Next.js 16 food ordering app backed by **Turso** (libSQL cloud). Customers brows
 - **Turso** (libSQL) via Drizzle ORM
 - **NextAuth v4** — email/password, JWT sessions
 - **Stripe** — hosted checkout, webhook for payment confirmation
+- **Vercel Blob** — image storage for menu items
 
 ## Features
 
-- 10 seeded Italian menu items with photos
+**Customer**
+- Browse 10 seeded Italian menu items with photos
 - Cart stored in browser localStorage (no login needed to browse)
 - Pickup or delivery orders with phone number
 - Stripe hosted checkout (test mode); orders placed directly when Stripe is not configured
 - Order history per customer
-- Admin API to view all orders and advance status (pending → confirmed → preparing → delivered)
+
+**Admin** (protected — `/admin` only)
+- View all orders, advance status (pending → confirmed → preparing → delivered)
+- Manage user accounts: list, promote/demote admin role, delete
+- Manage menu items: add, edit (name, description, price, image), delete
+- Upload dish images directly from the browser (stored on Vercel Blob)
 
 ---
 
@@ -25,7 +32,7 @@ Next.js 16 food ordering app backed by **Turso** (libSQL cloud). Customers brows
 **Prerequisites:** Node.js 20+, a Turso database (see [turso.tech](https://turso.tech)).
 
 ```bash
-git clone <your-repo>
+git clone https://github.com/kappasan21/food-order.git
 cd food-order
 cp .env.example .env.local
 # Fill in .env.local — see the comments in .env.example
@@ -46,6 +53,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | `NEXTAUTH_URL` | Yes | App public URL — `http://localhost:3000` locally |
 | `STRIPE_SECRET_KEY` | Optional | `sk_test_...` from Stripe dashboard — omit to skip payment |
 | `STRIPE_WEBHOOK_SECRET` | With Stripe | `whsec_...` from Stripe dashboard endpoint |
+| `BLOB_READ_WRITE_TOKEN` | Admin images | From Vercel → Storage → Blob → `.env.local` tab |
 | `ADMIN_EMAIL` | Seed only | Email for the admin account seed script |
 | `ADMIN_PASSWORD` | Seed only | Password for the admin account (min 8 chars) |
 
@@ -60,7 +68,7 @@ Create the admin user (after `db:setup`):
 npx tsx src/db/seed-admin.ts
 ```
 
-This creates a new user or promotes an existing one to the `admin` role. Log in with those credentials — admin API endpoints at `/api/admin/orders` will be accessible.
+This creates a new user or promotes an existing one to the `admin` role. Log in with those credentials and visit `/admin`.
 
 ---
 
@@ -85,35 +93,30 @@ git push -u origin master
 
 ### 2. Create Vercel project
 
-1. Go to [vercel.com](https://vercel.com) → **Add New Project**
-2. Import the GitHub repo
-3. Framework preset: **Next.js** (auto-detected)
-4. Click **Deploy** (first deploy will fail without env vars — that's expected)
+1. Go to [vercel.com](https://vercel.com) → **Add New Project** → import the repo
+2. Framework preset: **Next.js** (auto-detected) → **Deploy**
 
 ### 3. Add environment variables in Vercel
 
-In your Vercel project → **Settings → Environment Variables**, add all 8 variables from `.env.example`. Set `NEXTAUTH_URL` to your Vercel deployment URL (e.g. `https://food-order-abc.vercel.app`).
+Vercel → **Settings → Environment Variables** — add all 9 vars from `.env.example`.
+Set `NEXTAUTH_URL` to your Vercel deployment URL (e.g. `https://food-order-abc.vercel.app`).
 
-Leave `STRIPE_WEBHOOK_SECRET` blank for now — set it in step 4.
+### 4. Set up Vercel Blob (for menu image uploads)
 
-Redeploy after adding vars.
+Vercel → **Storage** → **Create Database** → **Blob** → give it a name → **Create**.
+Copy the `BLOB_READ_WRITE_TOKEN` from the `.env.local` tab → add to Vercel env vars.
 
-### 4. Set up Stripe webhook
+### 5. Set up Stripe webhook
 
-1. Go to [Stripe dashboard → Webhooks](https://dashboard.stripe.com/test/webhooks)
-2. **Add endpoint**
-   - URL: `https://your-vercel-url.vercel.app/api/webhooks/stripe`
-   - Events: `checkout.session.completed`
-3. After saving, copy the **Signing secret** (`whsec_...`)
-4. Add it as `STRIPE_WEBHOOK_SECRET` in Vercel env vars → **Redeploy**
+1. [Stripe dashboard → Webhooks](https://dashboard.stripe.com/test/webhooks) → **Add endpoint** (or **Create event destination**)
+2. URL: `https://your-vercel-url.vercel.app/api/webhooks/stripe`
+3. Event: `checkout.session.completed`
+4. Copy the **Signing secret** (`whsec_...`) → add as `STRIPE_WEBHOOK_SECRET` in Vercel → **Redeploy**
 
-### 5. Seed admin on production
-
-The Turso cloud DB is already seeded (menu items). To create the admin account, run the seed script once with the production env:
+### 6. Seed admin on production
 
 ```bash
-# In your local .env.local, temporarily point to the production Turso DB
-# and set ADMIN_EMAIL / ADMIN_PASSWORD, then:
+# Set TURSO_DATABASE_URL (cloud), ADMIN_EMAIL, ADMIN_PASSWORD in .env.local, then:
 npx tsx src/db/seed-admin.ts
 ```
 
@@ -125,7 +128,8 @@ npx tsx src/db/seed-admin.ts
 src/
   app/
     (main)/          # Home, /menu, /cart, /checkout, /orders
-    api/             # /api/checkout, /api/orders, /api/admin/orders, /api/webhooks/stripe
+    (admin)/         # /admin, /admin/orders, /admin/users, /admin/menu
+    api/             # /api/checkout, /api/orders, /api/admin/*, /api/webhooks/stripe
     login/ register/
   components/        # cart-view, menu-grid, order-list, providers
   db/                # schema, Drizzle client, seed scripts
@@ -134,6 +138,7 @@ src/
 
 ## Known limitations
 
-- No admin UI pages — admin access is via the API only (`/api/admin/orders`)
+- No pagination on admin lists
+- No bulk actions in admin
 - Prices are in USD; currency is not configurable
 - No order cancellation or refund flow
